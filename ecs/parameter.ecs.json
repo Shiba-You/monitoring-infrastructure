@@ -1,0 +1,42 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "shiba-metrics"
+  },
+  {
+    "ParameterKey": "ECSTaskName",
+    "ParameterValue": "shiba-metrics-task"
+  },
+  {
+    "ParameterKey": "PrometheusImage",
+    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-prometheus-ecr-repo:latest"
+  },
+  {
+    "ParameterKey": "GrafanaImage",
+    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-grafana-ecr-repo:latest"
+  },
+  {
+    "ParameterKey": "NginxImage",
+    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-nginx-ecr-repo:latest"
+  },
+  {
+    "ParameterKey": "NginxExporterImage",
+    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-nginx-exporter-ecr-repo:latest"
+  },
+  {
+    "ParameterKey": "PrometheusPort",
+    "ParameterValue": "9090"
+  },
+  {
+    "ParameterKey": "GrafanaPort",
+    "ParameterValue": "3000"
+  },
+  {
+    "ParameterKey": "NginxPort",
+    "ParameterValue": "80"
+  },
+  {
+    "ParameterKey": "NginxExporterPort",
+    "ParameterValue": "9113"
+  }
+]

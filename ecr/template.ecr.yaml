@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Create ECR
+
+Parameters:
+  ProjectName:
+    Default: ProjectName
+    Type: String
+    Description: Project Name
+
+Resources:
+  PrometheusECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ProjectName}-prometheus-ecr-repo
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-prometheus-ecr-repo_tag
+
+  # CAdvisorECR:
+  #   Type: AWS::ECR::Repository
+  #   Properties:
+  #     RepositoryName: !Sub ${ProjectName}-cadvisor-ecr-repo
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub ${ProjectName}-cadvisor-ecr-repo_tag
+
+  GrafanaECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ProjectName}-grafana-ecr-repo
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-grafana-ecr-repo_tag
+
+  # RedisECR:
+  #   Type: AWS::ECR::Repository
+  #   Properties:
+  #     RepositoryName: !Sub ${ProjectName}-redis-ecr-repo
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Sub ${ProjectName}-redis-ecr-repo_tag
+
+  NginxECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ProjectName}-nginx-ecr-repo
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nginx-ecr-repo_tag
+
+  NginxExporterECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${ProjectName}-nginx-exporter-ecr-repo
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nginx-exporter-ecr-repo_tag
+
+  ############################################
+  #### Delete Stack Sceduler              ####
+  ############################################
+  EventSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: "Delete Schedule"
+      ScheduleExpression: !Sub "cron(35 02 ? * * *)"
+      ScheduleExpressionTimezone: "Asia/Tokyo"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack"
+        Input: !Sub '{ "StackName": "${AWS::StackName}" }'
+        RoleArn: !ImportValue DeleteSchedulerRoleARN

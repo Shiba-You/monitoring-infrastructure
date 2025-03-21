@@ -1,0 +1,621 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Create Fargate and ALB
+
+Parameters:
+  ProjectName:
+    Default: ProjectName
+    Type: String
+    Description: Project Name
+  ECSTaskName:
+    Type: String
+    Description: ECS Task Name for ECSTaskDefinition
+  PrometheusImage:
+    Type: String
+    Description: image
+  GrafanaImage:
+    Type: String
+    Description: image
+  NginxImage:
+    Type: String
+    Description: image
+  NginxExporterImage:
+    Type: String
+    Description: image
+  PrometheusPort:
+    Type: Number
+    Description: port number
+  GrafanaPort:
+    Type: Number
+    Description: port number
+  NginxPort:
+    Type: Number
+    Description: port number
+  NginxExporterPort:
+    Type: Number
+    Description: port number
+
+Resources:
+  ######################################################
+  ###  Security Group                                ###
+  ######################################################
+  ALBsg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: security group from web to ecs via alb for alb
+      GroupName: !Sub ${ProjectName}-alb-tg
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-alb-sg_tag
+      VpcId:
+        "Fn::ImportValue": { "Fn::Sub": "${ProjectName}-VpcId" }
+
+  ALBsgIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ALBsg
+      CidrIp: 0.0.0.0/0
+      Description: from web
+      IpProtocol: -1
+
+  ECSsgEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ECSsg
+      CidrIp: 0.0.0.0/0
+      Description: for web
+      IpProtocol: -1
+
+  ###############################################################
+
+  ECSsg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: security group from alb to ecs for ecs
+      GroupName: !Sub ${ProjectName}-ecs-tg
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ecs-sg_tag
+      VpcId:
+        "Fn::ImportValue": { "Fn::Sub": "${ProjectName}-VpcId" }
+
+  ALBsgEgressPrometheus:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBsg
+      DestinationSecurityGroupId: !GetAtt ECSsg.GroupId
+      FromPort: !Ref PrometheusPort
+      ToPort: !Ref PrometheusPort
+      IpProtocol: tcp
+
+  ALBsgEgressGrafana:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBsg
+      DestinationSecurityGroupId: !GetAtt ECSsg.GroupId
+      FromPort: !Ref GrafanaPort
+      ToPort: !Ref GrafanaPort
+      IpProtocol: tcp
+
+  ALBsgEgressNginx:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBsg
+      DestinationSecurityGroupId: !GetAtt ECSsg.GroupId
+      FromPort: !Ref NginxPort
+      ToPort: !Ref NginxPort
+      IpProtocol: tcp
+
+  # ALBsgEgressNginxExporter:
+  #   Type: AWS::EC2::SecurityGroupEgress
+  #   Properties:
+  #     GroupId: !Ref ALBsg
+  #     DestinationSecurityGroupId: !GetAtt ECSsg.GroupId
+  #     FromPort: !Ref NginxExporterPort
+  #     ToPort: !Ref NginxExporterPort
+  #     IpProtocol: tcp
+
+  ECSsgIngressPrometheus:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSsg
+      SourceSecurityGroupId: !GetAtt ALBsg.GroupId
+      Description: from alb
+      FromPort: !Ref PrometheusPort
+      ToPort: !Ref PrometheusPort
+      IpProtocol: tcp
+
+  ECSsgIngressGrafana:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSsg
+      SourceSecurityGroupId: !GetAtt ALBsg.GroupId
+      Description: from alb
+      FromPort: !Ref GrafanaPort
+      ToPort: !Ref GrafanaPort
+      IpProtocol: tcp
+
+  ECSsgIngressNginx:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSsg
+      SourceSecurityGroupId: !GetAtt ALBsg.GroupId
+      Description: from alb
+      FromPort: !Ref NginxPort
+      ToPort: !Ref NginxPort
+      IpProtocol: tcp
+
+  ECSsgIngressNginxExporter:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSsg
+      SourceSecurityGroupId: !GetAtt ALBsg.GroupId
+      Description: from alb
+      FromPort: !Ref NginxExporterPort
+      ToPort: !Ref NginxExporterPort
+      IpProtocol: tcp
+
+  ######################################################
+  ###  ALB                                           ###
+  ######################################################
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${ProjectName}-alb
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ALBsg
+      Subnets:
+        - Fn::ImportValue: !Sub ${ProjectName}-PubSub1aId
+        - Fn::ImportValue: !Sub ${ProjectName}-PubSub1cId
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-alb_tag
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: "404 Not Found"
+            StatusCode: "404"
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+
+  TargetGroupPrometheus:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: prometheus-tg
+      Port: !Ref PrometheusPort
+      Protocol: HTTP
+      VpcId:
+        "Fn::ImportValue": { "Fn::Sub": "${ProjectName}-VpcId" }
+      TargetType: ip
+      HealthCheckPath: "/-/ready"
+      HealthCheckIntervalSeconds: 30 # 30秒毎にチェック
+      HealthCheckTimeoutSeconds: 5 # 5秒以内に応答がなければタイムアウト
+      HealthyThresholdCount: 2 # 2回連続成功で「正常」と判断
+      UnhealthyThresholdCount: 2 # 2回連続失敗で「異常」と判断
+
+  TargetGroupGrafana:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: grafana-tg
+      Port: !Ref GrafanaPort
+      Protocol: HTTP
+      VpcId:
+        "Fn::ImportValue": { "Fn::Sub": "${ProjectName}-VpcId" }
+      TargetType: ip
+      HealthCheckPath: "/api/health"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  TargetGroupNginx:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: nginx-tg
+      Port: !Ref NginxPort
+      Protocol: HTTP
+      VpcId:
+        "Fn::ImportValue": { "Fn::Sub": "${ProjectName}-VpcId" }
+      TargetType: ip
+      HealthCheckPath: "/"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  TargetGroupNginxExporter:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: nginx-exporter-tg
+      Port: !Ref NginxExporterPort
+      Protocol: HTTP
+      VpcId:
+        "Fn::ImportValue": { "Fn::Sub": "${ProjectName}-VpcId" }
+      TargetType: ip
+      HealthCheckPath: "/metrics"
+      HealthCheckPort: traffic-port
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  ListenerRulePrometheus:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/prometheus/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupPrometheus
+
+  ListenerRuleGrafana:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 2
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/grafana/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupGrafana
+
+  ListenerRuleNginx:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 3
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/nginx/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupNginx
+
+  ListenerRuleNginxExporter:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 4
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/nginx-exporter/*"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupNginxExporter
+
+  ######################################################
+  ###  Log                                           ###
+  ######################################################
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${ProjectName}-log-group
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-log-group_tag
+
+  ######################################################
+  ###  IAM                                           ###
+  ######################################################
+  ECSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ecs-tasks.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Description: !Sub execution role for ${ProjectName}-${ECSTaskName}
+      RoleName: !Sub ${ProjectName}-${ECSTaskName}
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${ECSTaskName}_tag
+
+  ######################################################
+  ###  ECS                                           ###
+  ######################################################
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${ProjectName}-ecs-cluster
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-ecs-cluster
+
+  PrometheusECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: 1024
+      ExecutionRoleArn: !Ref ECSRole
+      Family: !Sub ${ProjectName}-${ECSTaskName}-prometheus
+      Memory: 2048
+      NetworkMode: awsvpc
+      PidMode: task
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Image: !Ref PrometheusImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: !Ref ProjectName
+          Name: !Sub ${ProjectName}-prometheus-container
+          MemoryReservation: 1024
+          PortMappings:
+            - AppProtocol: http
+              ContainerPort: !Ref PrometheusPort
+              Name: to-prometheus
+          Command:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - !Sub "--web.external-url=http://${ALB.DNSName}:${PrometheusPort}/prometheus"
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${ECSTaskName}-prometheus
+
+  PrometheusECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListener
+      - ListenerRulePrometheus
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub ${ProjectName}-prometheus-container
+          ContainerPort: !Ref PrometheusPort
+          TargetGroupArn: !Ref TargetGroupPrometheus
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSsg
+          Subnets:
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1aId
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1cId
+      SchedulingStrategy: REPLICA
+      ServiceName: !Sub ${ProjectName}-Prometheus-ecs-service
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-prometheus-ecs-service
+      TaskDefinition: !Ref PrometheusECSTaskDefinition
+
+  GrafanaECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: 1024
+      ExecutionRoleArn: !Ref ECSRole
+      Family: !Sub ${ProjectName}-${ECSTaskName}-grafana
+      Memory: 2048
+      NetworkMode: awsvpc
+      PidMode: task
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Image: !Ref GrafanaImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: !Ref ProjectName
+          Name: !Sub ${ProjectName}-grafana-container
+          MemoryReservation: 1024
+          PortMappings:
+            - AppProtocol: http
+              ContainerPort: !Ref GrafanaPort
+              Name: to-grafana
+          Environment:
+            - Name: GF_SERVER_ROOT_URL
+              Value: !Sub
+                - "http://${ALBDNSName}:${GrafanaPort}/grafana/"
+                - {
+                    ALBDNSName: !GetAtt ALB.DNSName,
+                    GrafanaPort: !Ref GrafanaPort,
+                  }
+            - Name: GF_SERVER_SERVE_FROM_SUB_PATH
+              Value: "true"
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${ECSTaskName}-grafana
+
+  GrafanaECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListener
+      - ListenerRuleGrafana
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub ${ProjectName}-grafana-container
+          ContainerPort: !Ref GrafanaPort
+          TargetGroupArn: !Ref TargetGroupGrafana
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSsg
+          Subnets:
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1aId
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1cId
+      SchedulingStrategy: REPLICA
+      ServiceName: !Sub ${ProjectName}-grafana-ecs-service
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-grafana-ecs-service
+      TaskDefinition: !Ref GrafanaECSTaskDefinition
+
+  NginxECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: 1024
+      ExecutionRoleArn: !Ref ECSRole
+      Family: !Sub ${ProjectName}-${ECSTaskName}-nginx
+      Memory: 2048
+      NetworkMode: awsvpc
+      PidMode: task
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Image: !Ref NginxImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: !Ref ProjectName
+          Name: !Sub ${ProjectName}-nginx-container
+          MemoryReservation: 1024
+          PortMappings:
+            - AppProtocol: http
+              ContainerPort: !Ref NginxPort
+              Name: to-nginx
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${ECSTaskName}-nginx
+
+  NginxECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListener
+      - ListenerRuleNginx
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub ${ProjectName}-nginx-container
+          ContainerPort: !Ref NginxPort
+          TargetGroupArn: !Ref TargetGroupNginx
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSsg
+          Subnets:
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1aId
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1cId
+      SchedulingStrategy: REPLICA
+      ServiceName: !Sub ${ProjectName}-nginx-ecs-service
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nginx-ecs-service
+      TaskDefinition: !Ref NginxECSTaskDefinition
+
+  NginxExporterECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: 1024
+      ExecutionRoleArn: !Ref ECSRole
+      Family: !Sub ${ProjectName}-${ECSTaskName}-nginx-exporter
+      Memory: 2048
+      NetworkMode: awsvpc
+      PidMode: task
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Image: !Ref NginxExporterImage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: !Ref ProjectName
+          Name: !Sub ${ProjectName}-nginx-exporter-container
+          MemoryReservation: 1024
+          PortMappings:
+            - AppProtocol: http
+              ContainerPort: !Ref NginxExporterPort
+              Name: to-nginx-exporter
+          Command:
+            - !Sub "--nginx.scrape-uri=http://${ALB.DNSName}:${NginxPort}/nginx/nginx_status"
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${ECSTaskName}-nginx-exporter
+
+  NginxExporterECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ALBListener
+      - ListenerRuleNginxExporter
+      - TargetGroupNginxExporter
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub ${ProjectName}-nginx-exporter-container
+          ContainerPort: !Ref NginxExporterPort
+          TargetGroupArn: !Ref TargetGroupNginxExporter
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSsg
+          Subnets:
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1aId
+            - Fn::ImportValue: !Sub ${ProjectName}-PubSub1cId
+      SchedulingStrategy: REPLICA
+      ServiceName: !Sub ${ProjectName}-nginx-exporter-ecs-service
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nginx-exporter-ecs-service
+      TaskDefinition: !Ref NginxExporterECSTaskDefinition
+
+  ############################################
+  #### Delete Stack Sceduler              ####
+  ############################################
+  EventSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: "Delete Schedule"
+      ScheduleExpression: !Sub "cron(40 02 ? * * *)"
+      ScheduleExpressionTimezone: "Asia/Tokyo"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack"
+        Input: !Sub '{ "StackName": "${AWS::StackName}" }'
+        RoleArn: !ImportValue DeleteSchedulerRoleARN
+
+############################################
+#### OutPuts                            ####
+############################################
+Outputs:
+  ECSRole:
+    Value: !Ref ECSRole
+    Description: ECS Role
+    Export:
+      Name: !Sub ${ProjectName}-ECSRole
+  # TargetGroup:
+  #   Value: !Ref TargetGroup
+  #   Description: ALB target group
+  #   Export:
+  #     Name: !Sub ${ProjectName}-TargetGroup
+  ECSsg:
+    Value: !Ref ECSsg
+    Description: ECS security group
+    Export:
+      Name: !Sub ${ProjectName}-ECSsg
