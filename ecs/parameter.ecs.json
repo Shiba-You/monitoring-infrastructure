@@ -9,19 +9,19 @@
   },
   {
     "ParameterKey": "PrometheusImage",
-    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-prometheus-ecr-repo:latest"
+    "ParameterValue": <Prometheusのレポジトリ ARN>
   },
   {
     "ParameterKey": "GrafanaImage",
-    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-grafana-ecr-repo:latest"
+    "ParameterValue": <Grafanaのレポジトリ ARN>
   },
   {
     "ParameterKey": "NginxImage",
-    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-nginx-ecr-repo:latest"
+    "ParameterValue": <Nginxのレポジトリ ARN>
   },
   {
     "ParameterKey": "NginxExporterImage",
-    "ParameterValue": "350559882992.dkr.ecr.ap-northeast-1.amazonaws.com/shiba-metrics-nginx-exporter-ecr-repo:latest"
+    "ParameterValue": <NginxExporterのレポジトリ ARN>
   },
   {
     "ParameterKey": "PrometheusPort",
